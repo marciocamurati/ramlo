@@ -317,28 +317,28 @@ html(lang="en")
 
                                         if endpoint.responseBody
 
-                                            h2(class='documentation__subheader')= 'Response '
-                                            div(class='documentation__response')
-                                                p(class='documentation__response__code text-success') (200)
-
-                                                if endpoint.responseBody["type"]
-                                                    span= "Content-Type: "
-                                                    if endpoint.responseBody["type"].name
-                                                        strong(class="typeName")= endpoint.responseBody["type"].name
-                                                    if endpoint.responseBody["type"].type
-                                                        span(class="typeType")= " | type: "
-                                                        +getTypesType(endpoint.responseBody["type"].type)
-                                                    if endpoint.responseBody["type"].schema
-                                                        div(class="typeType")
-                                                            - var schemalink = '#schemas-' + endpoint.responseBody["type"].schema
-                                                            span= "Schema: "
-                                                            a(href=schemalink class='text-bold')= endpoint.responseBody["type"].schema
-
-                                                    //dumping data for the moment, need to add properties
-                                                    div
-                                                        if endpoint.responseBody["type"].properties
-                                                            h6 Properties
-                                                            +typePropsTable( endpoint.responseBody["type"].properties )
+                                            //- h2(class='documentation__subheader')= 'Response '
+                                            //- div(class='documentation__response')
+                                            //-     p(class='documentation__response__code text-success') (200)
+                                            //- 
+                                            //-     if endpoint.responseBody["type"]
+                                            //-         span= "Content-Type: "
+                                            //-         if endpoint.responseBody["type"].name
+                                            //-             strong(class="typeName")= endpoint.responseBody["type"].name
+                                            //-         if endpoint.responseBody["type"].type
+                                            //-             span(class="typeType")= " | type: "
+                                            //-             +getTypesType(endpoint.responseBody["type"].type)
+                                            //-         if endpoint.responseBody["type"].schema
+                                            //-             div(class="typeType")
+                                            //-                 - var schemalink = '#schemas-' + endpoint.responseBody["type"].schema
+                                            //-                 span= "Schema: "
+                                            //-                 a(href=schemalink class='text-bold')= endpoint.responseBody["type"].schema
+                                            //- 
+                                            //-         //dumping data for the moment, need to add properties
+                                            //-         div
+                                            //-             if endpoint.responseBody["type"].properties
+                                            //-                 h6 Properties
+                                            //-                 +typePropsTable( endpoint.responseBody["type"].properties )
 
                                             //temporary removal of response body in table
                                             //if endpoint.responseBody["tbody"]

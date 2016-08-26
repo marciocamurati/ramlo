@@ -410,9 +410,15 @@ html(lang="en")
                                                 each example, index in endpoint.responseExample
                                                     - var check = index === 0;
                                                     pre.example__content(class=check ? "is-active" : "" id='example-content#{globId + index}' data-tab='example-tab#{globId + index}')
-                                                        div.example__response !{example.response}
+                                                        div.example__response 
                                                             p(style='color: #fff;')
                                                               !{example.description}
+                                                            pre
+                                                                code
+                                                                    if typeof example.response === 'object'
+                                                                        !{JSON.stringify(example.response, undefined, 2)}
+                                                                    else
+                                                                        !{example.response}
                                             - globId += endpoint.responseExample.length;
 
                     //-- TYPES

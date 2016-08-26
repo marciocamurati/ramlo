@@ -40,6 +40,8 @@ function produceResources(api) {
     var apiResources = [];
     var ramlResources = api.resources();
 
+    var types = produceArrayOfUsesTypes(api);
+
     var namesArr = [];
 
     _.forEach(ramlResources, function (resource) {
@@ -63,7 +65,7 @@ function produceResources(api) {
                 name: name,
                 description: description,
                 type: type,
-                endpoints: _.flattenDeep(produceEndpoints(resource)),
+                endpoints: _.flattenDeep(produceEndpoints(resource, types)),
                 annotations: annotations
             });
         }
@@ -72,41 +74,43 @@ function produceResources(api) {
     return apiResources;
 }
 
-function produceEndpoints(resource) {
-    var endpoints = [];
-    var ramlNestedResources = resource.resources();
-    var ramlMethods = resource.methods();
+function produceEndpoints(resource, types) {
+  var endpoints = [];
+  var ramlNestedResources = resource.resources();
+  var ramlMethods = resource.methods();
 
-    _.forEach(ramlMethods, function (method) {
-        var description = method.description() && markdown.toHTML(method.description().value());
+  _.forEach(ramlMethods, function (method) {
+      var description = method.description() && markdown.toHTML(method.description().value());
 
-        var securedBy = method.securedBy() || '';
+      var securedBy = method.securedBy() || '';
 
-        var annotations = produceAnnotations(method);
+      var annotations = produceAnnotations(method);
 
-        //console.log( 'securedBy ' + securedBy );
+      //console.log( 'securedBy ' + securedBy );
 
-        endpoints.push({
-            uri: resource.completeRelativeUri(),
-            method: method.method(),
-            securedBy: securedBy,
-            description: description,
-            uriParameters: produceUriParameters(resource),
-            queryParameters: produceQueryParameters(method),
-            requestBody: produceRequestBody(method),
-            responseBody: produceResponseBody(method),
-            responseExample: produceResponseExample(method),
-            annotations: annotations
-        });
-    });
+      console.log('URI', resource.completeRelativeUri(), method.method());
 
-    if (ramlNestedResources.length) {
-        _.forEach(ramlNestedResources, function (resource) {
-            endpoints.push(produceEndpoints(resource));
-        });
-    }
+      endpoints.push({
+          uri: resource.completeRelativeUri(),
+          method: method.method(),
+          securedBy: securedBy,
+          description: description,
+          uriParameters: produceUriParameters(resource),
+          queryParameters: produceQueryParameters(method),
+          requestBody: produceRequestBody(method, types),
+          responseBody: produceResponseBody(method),
+          responseExample: produceResponseExample(method),
+          annotations: annotations
+      });
+  });
 
-    return endpoints;
+  if (ramlNestedResources.length) {
+      _.forEach(ramlNestedResources, function (resource) {
+          endpoints.push(produceEndpoints(resource, types));
+      });
+  }
+
+  return endpoints;
 }
 
 function produceUriParameters(resource) {
@@ -237,7 +241,7 @@ function produceQueryParameters(method) {
     return apiQueryParameters;
 }
 
-function produceRequestBody(method) {
+function produceRequestBody(method, types) {
     var apiBodySchema = {
         thead: {},
         tbody: []
@@ -245,22 +249,48 @@ function produceRequestBody(method) {
 
     var ramlBody = method.body();
 
-    if (Object.keys(ramlBody).length > 0 && _.isFunction(ramlBody.schemaContent)) {
+    if (Object.keys(ramlBody).length > 0) {
+        if (_.isFunction(ramlBody.schemaContent)) {
+          //expecting only 1 value to be valid
+          //there should NOT be 2 or more 'body' declarations
 
-        //expecting only 1 value to be valid
-        //there should NOT be 2 or more 'body' declarations
+          _.forEach(ramlBody, function (body) {
 
-        _.forEach(ramlBody, function (body) {
+              if (body.schemaContent() != null) {
+                  var sp = produceSchemaParameters(body.schemaContent());
 
-            if (body.schemaContent() != null) {
-                var sp = produceSchemaParameters(body.schemaContent());
+                  //make sure that 'body' key was valid
+                  if (sp['tbody'].length > 0) {
+                      apiBodySchema = sp;
+                  }
+              }
+          });
+        } else {
+          _.forEach(ramlBody, function (body) {
+            if ( (_.isFunction(body.type) && body.type()) && (!_.isFunction(body.properties) || body.properties().length == 0) ) {
+              _.forEach(body.type(), function (bodyType) {
+                var bodyTypes = bodyType.split('|');
 
-                //make sure that 'body' key was valid
-                if (sp['tbody'].length > 0) {
-                    apiBodySchema = sp;
-                }
+                _.forEach(bodyTypes, function (type) {
+                  // FIXME need to refactor to support more than one return
+                  var sp = produceJSONObjectParameters(type.trim(), types);
+
+                  //make sure that 'body' key was valid
+                  if (sp['tbody'].length > 0) {
+                      apiBodySchema = sp;
+                  }
+                });
+              });
+          } else if ( _.isFunction(body.properties) && body.properties() ) {
+            var sp = produceBodyPropertiesParameters(body.properties());
+
+            //make sure that 'body' key was valid
+            if (sp['tbody'].length > 0) {
+                apiBodySchema = sp;
             }
+          }
         });
+      }
     }
 
     return apiBodySchema;
@@ -325,21 +355,46 @@ function produceResponseExample(method) {
         if (response.code().value() !== undefined) {
             ramlBodies = response.body();
 
-            _.forEach(ramlBodies, function (body) {
-                apiExample = {
-                    response: body.toJSON().example,
-                    code: response.code().value()
-                };
-                if (apiExample.response !== undefined) {
+            description = (response.description() !== undefined && response.description() ? response.description().value() : '');
+
+            if (ramlBodies && ramlBodies.length > 0) {
+                _.forEach(ramlBodies, function (body) {
+                    apiExample = {
+                        code: response.code().value(),
+                        description: description,
+                        response: body.toJSON().example
+                    };
+
+                    if (apiExample.response !== undefined) {
+                        apiExample.response = apiExample.response; //&& hljs.highlight('json', apiExample.response).value;
+                    } else {
+                      if (body.toJSON().examples !== undefined) {
+                        apiExample.response = body.toJSON().examples[0].structuredValue;
+                      }
+                    }
+
                     try {
-                        apiExample.response = apiExample.response && hljs.highlight('json', apiExample.response).value;
+                        // console.log('==', apiExample.response);
                         apiExamples = apiExamples.concat(apiExample);
                     }
                     catch (err) {
                         console.log(err);
                     }
+                });
+            }   else    {
+                try{
+                    apiExample = {
+                      code: response.code().value(),
+                      description: description,
+                      response: ''
+                    };
+
+                    apiExamples = apiExamples.concat(apiExample);
                 }
-            });
+                catch (err) {
+                    console.log(err);
+                }
+            }
         }
     });
 
@@ -349,6 +404,118 @@ function produceResponseExample(method) {
     else {
         return apiExamples;
     }
+}
+
+function produceJSONObjectParameters(type, types) {
+  var schemaProperties = {
+      thead: {
+          name: true,
+          required: false,
+          type: false,
+          description: false
+      },
+      tbody: []
+  };
+
+  var keys = type.split('.');
+
+  if (keys.length == 2)  {
+    var typeObject = keys[0];
+    var key = keys[1];
+
+    _.forEach(types[typeObject].types(), function(keyTypeObject) {
+        if (keyTypeObject.name() == key)  {
+          var properties = _.isObject(keyTypeObject) ? keyTypeObject : JSON.parse(keyTypeObject);
+
+          _.forEach(keyTypeObject.type(), function(extendedType) {
+            var tempType = typeObject + '.' + extendedType;
+
+            var tempSchemaProperties = produceJSONObjectParameters(tempType, types);
+
+            if (tempSchemaProperties['thead'].required) {
+              schemaProperties['thead'].required = tempSchemaProperties['thead'].required;
+            }
+
+            if (tempSchemaProperties['thead'].type) {
+              schemaProperties['thead'].type = tempSchemaProperties['thead'].type;
+            }
+
+            if (tempSchemaProperties['thead'].description) {
+              schemaProperties['thead'].description = tempSchemaProperties['thead'].description;
+            }
+
+            schemaProperties['tbody'].push.apply(schemaProperties['tbody'], tempSchemaProperties['tbody']);
+          });
+
+          _.forEach(properties.properties(), function(property) {
+            nestedProperties = [];
+
+            if (_.isFunction(property.required) && property.required()) {
+                schemaProperties.thead.required = true;
+            }
+
+            //check if description exists
+            if (_.isFunction(property.description) && property.description()) {
+                schemaProperties.thead.description = true;
+            }
+
+            if (_.isFunction(property.type) && property.type()) {
+                schemaProperties.thead.type = true;
+            }
+
+            schemaProperties['tbody'].push({
+                name: property.name(),
+                type: property.type()[0],
+                description: (property.description()) ? property.description().value() : '',
+                isRequired: property.required(),
+                nestedProperties: null
+            });
+          });
+        }
+    });
+  }
+
+  return schemaProperties;
+}
+
+function produceBodyPropertiesParameters(properties) {
+    var schemaProperties = {
+        thead: {
+            name: true,
+            required: false,
+            type: false,
+            description: false
+        },
+        tbody: []
+    };
+
+    _.forEach(properties, function(property)  {
+      console.log('property', JSON.stringify(property))
+      nestedProperties = [];
+
+      if (_.isFunction(property.required) && property.required()) {
+          schemaProperties.thead.required = true;
+      }
+
+      //check if description exists
+      if (_.isFunction(property.description) && property.description()) {
+          schemaProperties.thead.description = true;
+      }
+
+      if (_.isFunction(property.type) && property.type()) {
+          schemaProperties.thead.type = true;
+      }
+
+      schemaProperties['tbody'].push({
+          name: property.name(),
+          type: property.type()[0],
+          description: (property.description()) ? property.description().value() : '',
+          isRequired: property.required(),
+          nestedProperties: null
+      });
+    });
+
+    return schemaProperties;
 }
 
 function produceSchemaParameters(schemaContent) {
@@ -677,15 +844,9 @@ module.exports = function (ramlFile) {
         resourceTypes = json.resourceTypes;
     }
 
-    /*
-     try{
-     api.annotationTypes().forEach(function(aType){
-     console.log('  name:',aType.name());
-     console.log('  type:',aType.type());
-     });
-     }
-     catch(err){}
-     */
+    if (json.uses != null && typeof json.uses != 'undefined') { //faster than try...catch
+        uses = json.uses;
+    }
 
     ramlo.ramlVersion = api.RAMLVersion();
     ramlo.apiTitle = api.title();

@@ -15,9 +15,9 @@ var markdown = require('markdown').markdown;
 var ramlo = {};
 
 function produceDescription(api) {
-    // var description = api.description();
-    // return description && description.value();
-    return '';  // @TODO: remove temporary workaround for "TypeError: api.description is not a function"
+    var description = api.description && api.description();
+    return description && markdown.toHTML(description.value());
+    return '';  // @TODO: remove temporary workaround for 'TypeError: api.description is not a function'
 }
 
 function produceDocumentations(api) {
@@ -40,14 +40,16 @@ function produceResources(api) {
     var apiResources = [];
     var ramlResources = api.resources();
 
+    var types = produceArrayOfUsesTypes(api);
+
     var namesArr = [];
 
     _.forEach(ramlResources, function (resource) {
         var uri = resource.completeRelativeUri();
         var name = resource.displayName() || capitalizeFirstLetter(uri.replace('/', ''));
-        var description = "";
+        var description = '';
         var annotations = produceAnnotations(resource);
-        var type = "";
+        var type = '';
 
         if (resource.description()) {
             description = resource.description().value();
@@ -63,7 +65,7 @@ function produceResources(api) {
                 name: name,
                 description: description,
                 type: type,
-                endpoints: _.flattenDeep(produceEndpoints(resource)),
+                endpoints: _.flattenDeep(produceEndpoints(resource, types)),
                 annotations: annotations
             });
         }
@@ -72,43 +74,43 @@ function produceResources(api) {
     return apiResources;
 }
 
-function produceEndpoints(resource) {
-    var endpoints = [];
-    var ramlNestedResources = resource.resources();
-    var ramlMethods = resource.methods();
+function produceEndpoints(resource, types) {
+  var endpoints = [];
+  var ramlNestedResources = resource.resources();
+  var ramlMethods = resource.methods();
 
+  _.forEach(ramlMethods, function (method) {
+      var description = method.description() && markdown.toHTML(method.description().value());
 
-    _.forEach(ramlMethods, function (method) {
-        var description = method.description() && markdown.toHTML(method.description().value());
+      var securedBy = method.securedBy() || '';
 
-        var securedBy = method.securedBy() || "";
+      var annotations = produceAnnotations(method);
 
-        var annotations = produceAnnotations(method);
+      //console.log( 'securedBy ' + securedBy );
 
+      console.log('URI', resource.completeRelativeUri(), method.method());
 
-        //console.log( "securedBy " + securedBy );
+      endpoints.push({
+          uri: resource.completeRelativeUri(),
+          method: method.method(),
+          securedBy: securedBy,
+          description: description,
+          uriParameters: produceUriParameters(resource),
+          queryParameters: produceQueryParameters(method),
+          requestBody: produceRequestBody(method, types),
+          responseBody: produceResponseBody(method),
+          responseExample: produceResponseExample(method),
+          annotations: annotations
+      });
+  });
 
-        endpoints.push({
-            uri: resource.completeRelativeUri(),
-            method: method.method(),
-            securedBy: securedBy,
-            description: description,
-            uriParameters: produceUriParameters(resource),
-            queryParameters: produceQueryParameters(method),
-            requestBody: produceRequestBody(method),
-            responseBody: produceResponseBody(method),
-            responseExample: produceResponseExample(method),
-            annotations: annotations
-        });
-    });
+  if (ramlNestedResources.length) {
+      _.forEach(ramlNestedResources, function (resource) {
+          endpoints.push(produceEndpoints(resource, types));
+      });
+  }
 
-    if (ramlNestedResources.length) {
-        _.forEach(ramlNestedResources, function (resource) {
-            endpoints.push(produceEndpoints(resource));
-        })
-    }
-
-    return endpoints;
+  return endpoints;
 }
 
 function produceUriParameters(resource) {
@@ -141,7 +143,7 @@ function produceUriParameters(resource) {
             apiUriParameters.thead.name = true;
         }
 
-        apiUriParameters["tbody"].push({
+        apiUriParameters['tbody'].push({
             name: parameter.name(),
             type: parameter.type(),
             description: description && markdown.toHTML(description.value())
@@ -169,8 +171,9 @@ function produceQueryParameters(method) {
 
     _.forEach(ramlQueryParameters, function (parameter) {
         var description = parameter.description();
-        var minLength = "";
-        var maxLength = "";
+        var minLength = '';
+        var maxLength = '';
+        var repeat;
 
         //check if name exists
         if (apiQueryParameters.thead.name == false && parameter.name() != null) {
@@ -218,8 +221,11 @@ function produceQueryParameters(method) {
         catch (err) {
         }
 
+        if (parameter.repeat && _.isFunction(parameter.repeat)) {
+            repeat = parameter.repeat();
+        }
 
-        apiQueryParameters["tbody"].push({
+        apiQueryParameters['tbody'].push({
             name: parameter.name(),
             type: parameter.type(),
             isRequired: parameter.required(),
@@ -228,14 +234,14 @@ function produceQueryParameters(method) {
             default: parameter.default(),
             minLength: minLength,
             maxLength: maxLength,
-            repeat: parameter.repeat()
+            repeat: repeat
         });
     });
 
     return apiQueryParameters;
 }
 
-function produceRequestBody(method) {
+function produceRequestBody(method, types) {
     var apiBodySchema = {
         thead: {},
         tbody: []
@@ -243,27 +249,52 @@ function produceRequestBody(method) {
 
     var ramlBody = method.body();
 
-    if (Object.keys(ramlBody).length > 0 && _.isFunction(body.schemaContent)) {
+    if (Object.keys(ramlBody).length > 0) {
+        if (_.isFunction(ramlBody.schemaContent)) {
+          //expecting only 1 value to be valid
+          //there should NOT be 2 or more 'body' declarations
 
-        //expecting only 1 value to be valid
-        //there should NOT be 2 or more "body" declarations
+          _.forEach(ramlBody, function (body) {
 
-        _.forEach(ramlBody, function (body) {
+              if (body.schemaContent() != null) {
+                  var sp = produceSchemaParameters(body.schemaContent());
 
-            if (body.schemaContent() != null) {
-                var sp = produceSchemaParameters(body.schemaContent());
+                  //make sure that 'body' key was valid
+                  if (sp['tbody'].length > 0) {
+                      apiBodySchema = sp;
+                  }
+              }
+          });
+        } else {
+          _.forEach(ramlBody, function (body) {
+            if ( (_.isFunction(body.type) && body.type()) && (!_.isFunction(body.properties) || body.properties().length == 0) ) {
+              _.forEach(body.type(), function (bodyType) {
+                var bodyTypes = bodyType.split('|');
 
-                //make sure that "body" key was valid
-                if (sp["tbody"].length > 0) {
-                    apiBodySchema = sp;
-                }
+                _.forEach(bodyTypes, function (type) {
+                  // FIXME need to refactor to support more than one return
+                  var sp = produceJSONObjectParameters(type.trim(), types);
+
+                  //make sure that 'body' key was valid
+                  if (sp['tbody'].length > 0) {
+                      apiBodySchema = sp;
+                  }
+                });
+              });
+          } else if ( _.isFunction(body.properties) && body.properties() ) {
+            var sp = produceBodyPropertiesParameters(body.properties());
+
+            //make sure that 'body' key was valid
+            if (sp['tbody'].length > 0) {
+                apiBodySchema = sp;
             }
+          }
         });
+      }
     }
 
     return apiBodySchema;
 }
-
 
 function produceResponseBody(method) {
     var ramlResponses = method.responses();
@@ -283,11 +314,11 @@ function produceResponseBody(method) {
                 //check if NULL before calling produceSchemaParameters()
                 var sch = body.schemaContent();
 
-                if (sch != null && typeof sch != "undefined") {
+                if (sch != null && typeof sch != 'undefined') {
 
                     var sp = produceSchemaParameters(sch);
 
-                    if (sp["tbody"].length > 0) {
+                    if (sp['tbody'].length > 0) {
                         schemaProperties = sp;
                     }
                 }
@@ -297,11 +328,11 @@ function produceResponseBody(method) {
                     var type = body.toJSON();
 
                     //this key is inserted by json parser, we don't need it
-                    if (type["__METADATA__"] != null) {
-                        delete type["__METADATA__"];
+                    if (type['__METADATA__'] != null) {
+                        delete type['__METADATA__'];
                     }
 
-                    schemaProperties["type"] = type;
+                    schemaProperties['type'] = type;
 
                 }
                 catch (err) {
@@ -324,21 +355,46 @@ function produceResponseExample(method) {
         if (response.code().value() !== undefined) {
             ramlBodies = response.body();
 
-            _.forEach(ramlBodies, function (body) {
-                apiExample = {
-                    response: body.toJSON().example,
-                    code: response.code().value()
-                };
-                if (apiExample.response !== undefined) {
+            description = (response.description() !== undefined && response.description() ? response.description().value() : '');
+
+            if (ramlBodies && ramlBodies.length > 0) {
+                _.forEach(ramlBodies, function (body) {
+                    apiExample = {
+                        code: response.code().value(),
+                        description: description,
+                        response: body.toJSON().example
+                    };
+
+                    if (apiExample.response !== undefined) {
+                        apiExample.response = apiExample.response; //&& hljs.highlight('json', apiExample.response).value;
+                    } else {
+                      if (body.toJSON().examples !== undefined) {
+                        apiExample.response = body.toJSON().examples[0].structuredValue;
+                      }
+                    }
+
                     try {
-                        apiExample.response = apiExample.response && hljs.highlight('json', apiExample.response).value;
+                        // console.log('==', apiExample.response);
                         apiExamples = apiExamples.concat(apiExample);
                     }
                     catch (err) {
-
+                        console.log(err);
                     }
+                });
+            }   else    {
+                try{
+                    apiExample = {
+                      code: response.code().value(),
+                      description: description,
+                      response: ''
+                    };
+
+                    apiExamples = apiExamples.concat(apiExample);
                 }
-            });
+                catch (err) {
+                    console.log(err);
+                }
+            }
         }
     });
 
@@ -348,6 +404,118 @@ function produceResponseExample(method) {
     else {
         return apiExamples;
     }
+}
+
+function produceJSONObjectParameters(type, types) {
+  var schemaProperties = {
+      thead: {
+          name: true,
+          required: false,
+          type: false,
+          description: false
+      },
+      tbody: []
+  };
+
+  var keys = type.split('.');
+
+  if (keys.length == 2)  {
+    var typeObject = keys[0];
+    var key = keys[1];
+
+    _.forEach(types[typeObject].types(), function(keyTypeObject) {
+        if (keyTypeObject.name() == key)  {
+          var properties = _.isObject(keyTypeObject) ? keyTypeObject : JSON.parse(keyTypeObject);
+
+          _.forEach(keyTypeObject.type(), function(extendedType) {
+            var tempType = typeObject + '.' + extendedType;
+
+            var tempSchemaProperties = produceJSONObjectParameters(tempType, types);
+
+            if (tempSchemaProperties['thead'].required) {
+              schemaProperties['thead'].required = tempSchemaProperties['thead'].required;
+            }
+
+            if (tempSchemaProperties['thead'].type) {
+              schemaProperties['thead'].type = tempSchemaProperties['thead'].type;
+            }
+
+            if (tempSchemaProperties['thead'].description) {
+              schemaProperties['thead'].description = tempSchemaProperties['thead'].description;
+            }
+
+            schemaProperties['tbody'].push.apply(schemaProperties['tbody'], tempSchemaProperties['tbody']);
+          });
+
+          _.forEach(properties.properties(), function(property) {
+            nestedProperties = [];
+
+            if (_.isFunction(property.required) && property.required()) {
+                schemaProperties.thead.required = true;
+            }
+
+            //check if description exists
+            if (_.isFunction(property.description) && property.description()) {
+                schemaProperties.thead.description = true;
+            }
+
+            if (_.isFunction(property.type) && property.type()) {
+                schemaProperties.thead.type = true;
+            }
+
+            schemaProperties['tbody'].push({
+                name: property.name(),
+                type: property.type()[0],
+                description: (property.description()) ? property.description().value() : '',
+                isRequired: property.required(),
+                nestedProperties: null
+            });
+          });
+        }
+    });
+  }
+
+  return schemaProperties;
+}
+
+function produceBodyPropertiesParameters(properties) {
+    var schemaProperties = {
+        thead: {
+            name: true,
+            required: false,
+            type: false,
+            description: false
+        },
+        tbody: []
+    };
+
+    _.forEach(properties, function(property)  {
+      console.log('property', JSON.stringify(property))
+      nestedProperties = [];
+
+      if (_.isFunction(property.required) && property.required()) {
+          schemaProperties.thead.required = true;
+      }
+
+      //check if description exists
+      if (_.isFunction(property.description) && property.description()) {
+          schemaProperties.thead.description = true;
+      }
+
+      if (_.isFunction(property.type) && property.type()) {
+          schemaProperties.thead.type = true;
+      }
+
+      schemaProperties['tbody'].push({
+          name: property.name(),
+          type: property.type()[0],
+          description: (property.description()) ? property.description().value() : '',
+          isRequired: property.required(),
+          nestedProperties: null
+      });
+    });
+
+    return schemaProperties;
 }
 
 function produceSchemaParameters(schemaContent) {
@@ -400,7 +568,7 @@ function produceSchemaParameters(schemaContent) {
                     schemaProperties.thead.type = true;
                 }
 
-                schemaProperties["tbody"].push({
+                schemaProperties['tbody'].push({
                     name: key,
                     type: value.type,
                     description: value.description,
@@ -412,7 +580,7 @@ function produceSchemaParameters(schemaContent) {
     }
     catch (err) {
         //console.log(err, schemaContent);
-        //console.log("////////////////////////////////////////////////////");
+        //console.log('////////////////////////////////////////////////////');
     }
 
     return schemaProperties;
@@ -454,7 +622,7 @@ function produceSecuredBy(api) {
 
 function produceProtocols(api) {
 
-    var protocols = " ";
+    var protocols = ' ';
     var protArr = [];
     try {
         protocols = api.protocols();
@@ -463,7 +631,7 @@ function produceProtocols(api) {
             protArr.push(p);
         });
 
-        protocols = "Protocols: " + protArr.join(", ");
+        protocols = 'Protocols: ' + protArr.join(', ');
     }
     catch (err) {
         //console.log( err );
@@ -481,7 +649,7 @@ function produceBaseUriParameters(api) {
 
             //api.baseUriParameters() function returns also 'version'
             // which can be retrieved from api.version()
-            if (parameter.name() != "version") {
+            if (parameter.name() != 'version') {
                 try {
                     baseUriParameters.push(parameter.toJSON());
                 }
@@ -527,32 +695,30 @@ function produceAllSecuritySchemes(api) {
 function getAllResourceTypes(api) {
     try {
         api.resourceTypes().forEach(function (resourceType) {
-            console.log(resourceType.name())
+            console.log(resourceType.name());
 
             resourceType.methods().forEach(function (method) {
-                console.log("\t" + method.method())
+                console.log('\t' + method.method());
 
                 method.responses().forEach(function (response) {
-                    console.log("\t\t" + response.code().value())
-                })
-            })
-        })
+                    console.log('\t\t' + response.code().value());
+                });
+            });
+        });
     }
     catch (e) {
         console.log(e);
     }
 }
 
-
 function printHierarchy(runtimeType, indent) {
-    indent = indent || "";
+    indent = indent || '';
     var typeName = runtimeType.nameId();
     console.log(indent + typeName);
     runtimeType.superTypes().forEach(function (st) {
-        printHierarchy(st, indent + "  ");
+        printHierarchy(st, indent + '  ');
     });
 }
-
 
 function produceAnnotations(method) {
 
@@ -568,7 +734,7 @@ function produceAnnotations(method) {
 
             //forEach
             a[name] = {
-                "value": structure
+                'value': structure
             };
 
             try {
@@ -585,7 +751,6 @@ function produceAnnotations(method) {
 
     return annotations;
 }
-
 
 function prepareSchemas(_schemas) {
 
@@ -620,14 +785,28 @@ function produceArrayOfCustomTypes(types) {
     return arr;
 }
 
+function produceArrayOfUsesTypes(api)  {
+  var uses = {};
+
+  var isFragment = raml.isFragment(api);
+
+  api.uses().forEach(function(use){
+    var useAst = use.ast();
+
+    uses[use.key()] = useAst;
+  });
+
+  return uses;
+}
+
 ///////////
 
 module.exports = function (ramlFile) {
     var api;
-    var apiBaseUri = "";
+    var apiBaseUri = '';
     var baseUriParameters = [];
     var types = [];
-    var resourceTypes = "";
+    var resourceTypes = '';
     var json = {};
     var schemas = [];
     var typeNamesArray = [];
@@ -646,38 +825,33 @@ module.exports = function (ramlFile) {
         apiBaseUri = api.baseUri().value().replace('{version}', api.version());
     }
     catch (err) {
-        //console.log("BaseUri" + err);
+        //console.log('BaseUri' + err);
     }
 
     // https://github.com/raml-org/raml-spec/blob/master/versions/raml-10/raml-10.md/#overview
-    if (json.types != null && typeof json.types != "undefined") { //faster than try...catch
+    if (json.types != null && typeof json.types != 'undefined') { //faster than try...catch
         types = json.types;
         typeNamesArray = produceArrayOfCustomTypes(types);
     }
 
-    if (json.schemas != null && typeof json.schemas != "undefined") { //faster than try...catch
+    if (json.schemas != null && typeof json.schemas != 'undefined') { //faster than try...catch
         schemas = json.schemas;
 
         schemas = prepareSchemas(schemas);
     }
 
-    if (json.resourceTypes != null && typeof json.resourceTypes != "undefined") { //faster than try...catch
+    if (json.resourceTypes != null && typeof json.resourceTypes != 'undefined') { //faster than try...catch
         resourceTypes = json.resourceTypes;
     }
 
-
-    /*
-     try{
-     api.annotationTypes().forEach(function(aType){
-     console.log("  name:",aType.name());
-     console.log("  type:",aType.type());
-     });
-     }
-     catch(err){}
-     */
+    if (json.uses != null && typeof json.uses != 'undefined') { //faster than try...catch
+        uses = json.uses;
+    }
 
     ramlo.ramlVersion = api.RAMLVersion();
     ramlo.apiTitle = api.title();
+    ramlo.apiVersion = api.version();
+
     ramlo.apiProtocol = produceProtocols(api);
     ramlo.apiDescription = produceDescription(api);
     ramlo.apiSecuritySchemes = produceAllSecuritySchemes(api);
@@ -689,8 +863,7 @@ module.exports = function (ramlFile) {
     ramlo.apiAllTypes = types;
     ramlo.typeNamesArray = typeNamesArray;
     ramlo.apiAllSchemas = schemas;
-
-    //console.log(ramlo.apiSecuritySchemes);
+    //ramlo.mediaType = api.mediaType(); // TODO RAML specification not covered: add the default mediaType property
 
     return ramlo;
 };

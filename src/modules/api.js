@@ -619,6 +619,20 @@ function produceArrayOfCustomTypes(types) {
     return arr;
 }
 
+function produceArrayOfUsesTypes(api)  {
+  var uses = {};
+
+  var isFragment = raml.isFragment(api);
+
+  api.uses().forEach(function(use){
+    var useAst = use.ast();
+
+    uses[use.key()] = useAst;
+  });
+
+  return uses;
+}
+
 ///////////
 
 module.exports = function (ramlFile) {

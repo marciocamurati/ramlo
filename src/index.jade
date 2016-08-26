@@ -411,6 +411,8 @@ html(lang="en")
                                                     - var check = index === 0;
                                                     pre.example__content(class=check ? "is-active" : "" id='example-content#{globId + index}' data-tab='example-tab#{globId + index}')
                                                         div.example__response !{example.response}
+                                                            p(style='color: #fff;')
+                                                              !{example.description}
                                             - globId += endpoint.responseExample.length;
 
                     //-- TYPES

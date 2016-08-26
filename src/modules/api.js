@@ -167,8 +167,8 @@ function produceQueryParameters(method) {
 
     _.forEach(ramlQueryParameters, function (parameter) {
         var description = parameter.description();
-        var minLength = "";
-        var maxLength = "";
+        var minLength = '';
+        var maxLength = '';
         var repeat;
 
         //check if name exists
@@ -217,12 +217,11 @@ function produceQueryParameters(method) {
         catch (err) {
         }
 
-
         if (parameter.repeat && _.isFunction(parameter.repeat)) {
             repeat = parameter.repeat();
         }
 
-        apiQueryParameters["tbody"].push({
+        apiQueryParameters['tbody'].push({
             name: parameter.name(),
             type: parameter.type(),
             isRequired: parameter.required(),

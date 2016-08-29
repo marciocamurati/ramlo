@@ -358,38 +358,44 @@ function produceResponseExample(method) {
             description = (response.description() !== undefined && response.description() ? response.description().value() : '');
 
             if (ramlBodies && ramlBodies.length > 0) {
-                _.forEach(ramlBodies, function (body) {
-                    apiExample = {
-                        code: response.code().value(),
-                        description: description,
-                        response: body.toJSON().example
-                    };
-
-                    if (apiExample.response !== undefined) {
-                        apiExample.response = apiExample.response; //&& hljs.highlight('json', apiExample.response).value;
-                    } else {
-                      if (body.toJSON().examples !== undefined) {
-                        apiExample.response = body.toJSON().examples[0].structuredValue;
-                      }
-                    }
-
-                    try {
-                        // console.log('==', apiExample.response);
-                        apiExamples = apiExamples.concat(apiExample);
-                    }
-                    catch (err) {
-                        console.log(err);
-                    }
-                });
-            }   else    {
-                try{
-                    apiExample = {
+              _.forEach(ramlBodies, function (body) {
+                  apiExample = {
                       code: response.code().value(),
                       description: description,
-                      response: ''
-                    };
+                      response: body.toJSON().example
+                  };
 
-                    apiExamples = apiExamples.concat(apiExample);
+                  if (apiExample.response !== undefined) {
+                      apiExample.response = apiExample.response; //&& hljs.highlight('json', apiExample.response).value;
+                  } else {
+                    if (body.toJSON().examples !== undefined) {
+                      // TODO need to iterate to all examples
+                      var example = body.toJSON().examples[0];
+
+                      if (example.structuredValue === undefined)  {
+                          apiExample.response = body.toJSON().examples[0].value;
+                      } else {
+                          apiExample.response = body.toJSON().examples[0].structuredValue;
+                      }
+                    }
+                  }
+
+                  try {
+                      apiExamples = apiExamples.concat(apiExample);
+                  }
+                  catch (err) {
+                      console.log(err);
+                  }
+              });
+            }   else    {
+                try{
+                  apiExample = {
+                    code: response.code().value(),
+                    description: description,
+                    response: ''
+                  };
+
+                  apiExamples = apiExamples.concat(apiExample);
                 }
                 catch (err) {
                     console.log(err);
